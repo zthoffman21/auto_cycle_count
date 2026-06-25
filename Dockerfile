@@ -34,7 +34,7 @@ RUN groupadd --system app \
     && mkdir -p /home/app/.cache \
     && chown -R app:app /home/app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
 
 FROM python-base AS development-dependencies
 
