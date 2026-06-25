@@ -469,13 +469,12 @@ export function TrainingPage() {
 
   function handleCanvasClick(event: React.MouseEvent<SVGSVGElement>) {
     if (!current || tool !== "tote-polygon" || event.detail > 1) return;
-    setDraftPoints((points) => [...points, canvasPoint(event)]);
-  }
-
-  function handleCanvasDoubleClick(event: React.MouseEvent<SVGSVGElement>) {
-    if (tool !== "tote-polygon") return;
-    event.preventDefault();
-    if (draftPoints.length >= 3) addRegion("tote", draftPoints);
+    const nextPoints = [...draftPoints, canvasPoint(event)];
+    if (nextPoints.length === 4) {
+      addRegion("tote", nextPoints);
+      return;
+    }
+    setDraftPoints(nextPoints);
   }
 
   function handlePointerDown(event: React.PointerEvent<SVGSVGElement>) {
@@ -660,7 +659,7 @@ export function TrainingPage() {
           title: "Step 2: outline the tote",
           body:
             shape === "polygon"
-              ? "Click around the tote boundary, then double-click the final point."
+              ? "Click four tote corners to create the outline."
               : "Drag from one tote corner to the opposite corner.",
         }
       : !wizard.dividersComplete
@@ -781,7 +780,6 @@ export function TrainingPage() {
                   ref={layerRef}
                   className={tool === "idle" ? "select-mode" : ""}
                   onClick={handleCanvasClick}
-                  onDoubleClick={handleCanvasDoubleClick}
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
