@@ -18,6 +18,7 @@ thresholds remain `UNCERTAIN`.
 
 ## 1. Start the annotation dashboard
 
+Run these commands from the project root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
@@ -57,16 +58,12 @@ data/training/exports/cells/
 docker stop cycle-count-vision
 ```
 
-## 4. Build the GPU training image
-
-```powershell
-docker build --target vision -t cycle-count-vision:vision .
-```
+## 4. Verify the GPU training image
 
 Verify that the GPU is visible:
 
 ```powershell
-docker run --rm --gpus all cycle-count-vision:vision python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+docker run --rm --gpus all cycle-count-vision:latest python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
 The expected result includes `True` and the NVIDIA GPU name.
@@ -82,13 +79,13 @@ New-Item -ItemType Directory -Force models
 Download DINOv2-small into the project:
 
 ```powershell
-docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace --env HF_HOME=/tmp/huggingface --env XDG_CACHE_HOME=/tmp cycle-count-vision:vision hf download facebook/dinov2-small --local-dir models/dinov2-vits14
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace --env HF_HOME=/tmp/huggingface --env XDG_CACHE_HOME=/tmp cycle-count-vision:latest hf download facebook/dinov2-small --local-dir models/dinov2-vits14
 ```
 
 ## 6. Train RF-DETR tote and cell segmentation
 
 ```powershell
-docker run --name rfdetr-train --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:vision python scripts/train_rfdetr.py --dataset data/training/exports/rfdetr --output output/rfdetr --model-output models/rf-detr-seg-small-totes.pth
+docker run --name rfdetr-train --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:latest python scripts/train_rfdetr.py --dataset data/training/exports/rfdetr --output output/rfdetr --model-output models/rf-detr-seg-small-totes.pth
 ```
 
 This trains class ID `0` as `tote` and class ID `1` as `cell`. During inference, detected cell
@@ -106,13 +103,13 @@ threshold remains `0.50`. These can be overridden with `CYCLE_COUNT_RFDETR_CONFI
 ## 7. Train the binary DINOv2 cell classifier
 
 ```powershell
-docker run --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:vision python scripts/train_empty_cell_head.py --dataset data/training/exports/cells --model models/dinov2-vits14 --output models/empty-cell-head.safetensors
+docker run --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:latest python scripts/train_empty_cell_head.py --dataset data/training/exports/cells --model models/dinov2-vits14 --output models/empty-cell-head.safetensors
 ```
 
 ## 8. Train the patch anomaly detector (optional — enables comparison mode)
 
 ```powershell
-docker run --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:vision python scripts/train_patch_anomaly_detector.py --dataset data/training/exports/cells --model models/dinov2-vits14 --output models/patch-anomaly.safetensors
+docker run --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:latest python scripts/train_patch_anomaly_detector.py --dataset data/training/exports/cells --model models/dinov2-vits14 --output models/patch-anomaly.safetensors
 ```
 
 This trains a one-class anomaly detector that learns only what an empty cell looks like. Unlike
@@ -124,7 +121,7 @@ compare both classifiers on the same image.
 ## 9. Download the GroundingDINO model (optional — enables comparison mode)
 
 ```powershell
-docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace --env HF_HOME=/tmp/huggingface --env XDG_CACHE_HOME=/tmp cycle-count-vision:vision hf download IDEA-Research/grounding-dino-base --local-dir models/grounding-dino-base
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace --env HF_HOME=/tmp/huggingface --env XDG_CACHE_HOME=/tmp cycle-count-vision:latest hf download IDEA-Research/grounding-dino-base --local-dir models/grounding-dino-base
 ```
 
 This downloads the zero-shot object detection model (~700 MB). No training is required — GroundingDINO is used as-is with the text prompt `"object."`. When `CYCLE_COUNT_GROUNDING_DINO_MODEL_PATH` is set, the dashboard shows a method toggle that includes `grounding_dino` alongside the other classifiers.
@@ -150,7 +147,6 @@ models/empty-cell-head.safetensors
 ## 11. Start
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
 ```
 
