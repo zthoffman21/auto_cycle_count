@@ -1,4 +1,5 @@
-﻿import logging
+import logging
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -9,8 +10,11 @@ from tote_vision.adapters.training_dataset import TrainingDatasetStore
 from tote_vision.api.dashboard_routes import router as dashboard_router
 from tote_vision.api.routes import router
 from tote_vision.api.training_routes import router as training_router
-from tote_vision.bootstrap import build_inspector
+from tote_vision.application.predict_training_geometry import TrainingGeometryPredictor
+from tote_vision.bootstrap import build_inspector, build_training_geometry_predictor
 from tote_vision.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -29,12 +33,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url=None,
     )
-    app.state.inspector = build_inspector(settings)
+    app.state.inspector = _try_build_inspector(settings)
+    app.state.vision_startup_error = (
+        None
+        if app.state.inspector is not None
+        else "vision models are not configured or could not be loaded"
+    )
     app.include_router(router)
     if settings.dashboard_enabled:
         app.state.artifact_store = LocalArtifactStore(settings.artifact_directory)
         app.state.max_upload_bytes = settings.max_upload_bytes
         app.state.training_store = TrainingDatasetStore(settings.training_directory)
+        app.state.training_geometry_predictor = _try_build_training_geometry_predictor(
+            settings,
+            app.state.inspector,
+        )
         app.include_router(dashboard_router)
         app.include_router(training_router)
         app.mount(
@@ -66,6 +79,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return FileResponse(dashboard_index)
 
     return app
+
+
+def _try_build_inspector(settings: Settings) -> Any | None:
+    if (
+        settings.rfdetr_checkpoint_path is None
+        or settings.dinov2_model_path is None
+        or settings.dinov2_classifier_path is None
+    ):
+        return None
+    try:
+        return build_inspector(settings)
+    except (RuntimeError, OSError) as exc:
+        logger.warning("vision inspector is unavailable: %s", exc)
+        return None
+
+
+def _try_build_training_geometry_predictor(
+    settings: Settings,
+    inspector: Any | None,
+) -> TrainingGeometryPredictor | None:
+    if inspector is not None:
+        return TrainingGeometryPredictor(
+            inspector._tote_detector,
+            inspector._layout_detector,
+        )
+    if settings.rfdetr_checkpoint_path is None:
+        return None
+    try:
+        return build_training_geometry_predictor(settings)
+    except (RuntimeError, OSError) as exc:
+        logger.warning("training geometry prediction is unavailable: %s", exc)
+        return None
 
 
 app = create_app()

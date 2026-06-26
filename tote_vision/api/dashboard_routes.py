@@ -29,6 +29,13 @@ async def inspect_uploaded_image(
     station_id: Annotated[str, Form()] = "MANUAL_DASHBOARD",
     camera_id: Annotated[str, Form()] = "UPLOAD",
 ) -> EmptyToteInspectionResponse:
+    inspector: InspectEmptyTote | None = request.app.state.inspector
+    if inspector is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="vision inference is not available; configure trained model paths",
+        )
+
     resolved_inspection_id = inspection_id or f"DEV-{uuid4().hex[:12].upper()}"
     for field_name, value in (
         ("inspectionId", resolved_inspection_id),
@@ -56,7 +63,6 @@ async def inspect_uploaded_image(
             detail=str(exc),
         ) from exc
 
-    inspector: InspectEmptyTote = request.app.state.inspector
     result = await inspector.execute(
         InspectionRequest(
             inspection_id=resolved_inspection_id,

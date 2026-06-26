@@ -38,11 +38,3 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: object) -> None:
         if self.environment.lower() == "production" and self.dashboard_enabled:
             raise ValueError("dashboard must be disabled in production until authentication exists")
-        required_paths = {
-            "rfdetr_checkpoint_path": self.rfdetr_checkpoint_path,
-            "dinov2_model_path": self.dinov2_model_path,
-            "dinov2_classifier_path": self.dinov2_classifier_path,
-        }
-        missing = [name for name, path in required_paths.items() if path is None]
-        if missing:
-            raise ValueError(f"vision inference requires: {', '.join(missing)}")

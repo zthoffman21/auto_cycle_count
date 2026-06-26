@@ -190,7 +190,7 @@ class InspectEmptyTote:
                 decision_version=self._decision_version,
                 completed_at=datetime.now(UTC),
                 image_uri=request.image_uri,
-                metadata={"errorType": type(exc).__name__},
+                metadata={"errorType": type(exc).__name__, "errorMessage": str(exc)},
             )
 
     def _resolve_classifiers(

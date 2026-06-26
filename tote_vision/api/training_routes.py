@@ -11,9 +11,16 @@ from tote_vision.adapters.training_dataset import (
 )
 from tote_vision.api.training_schemas import (
     TrainingDeleteResponse,
+    TrainingDraftPredictionItem,
+    TrainingDraftPredictionRequest,
+    TrainingDraftPredictionResponse,
     TrainingImageResponse,
     TrainingImageUpdate,
     TrainingStatusResponse,
+)
+from tote_vision.application.predict_training_geometry import (
+    TrainingGeometryPredictionError,
+    TrainingGeometryPredictor,
 )
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -53,6 +60,112 @@ async def upload_training_images(
             raise HTTPException(status_code=415, detail=str(exc)) from exc
         created.append(TrainingImageResponse.from_domain(record))
     return created
+
+
+@router.post(
+    "/images/predict-drafts",
+    response_model=TrainingDraftPredictionResponse,
+    response_model_by_alias=True,
+)
+async def predict_draft_training_images(
+    request: Request,
+    payload: TrainingDraftPredictionRequest,
+) -> TrainingDraftPredictionResponse:
+    store: TrainingDatasetStore = request.app.state.training_store
+    predictor: TrainingGeometryPredictor | None = getattr(
+        request.app.state,
+        "training_geometry_predictor",
+        None,
+    )
+    if predictor is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="training geometry prediction is not available; configure RF-DETR",
+        )
+    images = await asyncio.to_thread(store.list_images)
+    requested_ids = set(payload.image_ids) if payload.image_ids is not None else None
+    selected = [
+        image
+        for image in images
+        if requested_ids is None or image.image_id in requested_ids
+    ]
+    by_id = {image.image_id: image for image in selected}
+    results: list[TrainingDraftPredictionItem] = []
+
+    if requested_ids is not None:
+        for missing_id in sorted(requested_ids - set(by_id)):
+            results.append(
+                TrainingDraftPredictionItem(
+                    imageId=missing_id,
+                    status="failed",
+                    message="training image not found",
+                )
+            )
+
+    for image in selected:
+        if image.ready:
+            results.append(
+                TrainingDraftPredictionItem(
+                    imageId=image.image_id,
+                    status="skipped",
+                    layout=image.layout,
+                    regionCount=len(image.regions),
+                    message="image is already ready",
+                )
+            )
+            continue
+        if image.regions and not payload.overwrite:
+            results.append(
+                TrainingDraftPredictionItem(
+                    imageId=image.image_id,
+                    status="skipped",
+                    layout=image.layout,
+                    regionCount=len(image.regions),
+                    message="draft already has geometry",
+                )
+            )
+            continue
+
+        try:
+            prediction = await predictor.predict(
+                image, store.image_directory / image.storage_filename
+            )
+            updated = await asyncio.to_thread(
+                store.update_image,
+                image.image_id,
+                split=image.split,
+                layout=prediction.layout,
+                regions=prediction.regions,
+                ready=False,
+            )
+        except (TrainingGeometryPredictionError, TrainingDataError, FileNotFoundError) as exc:
+            results.append(
+                TrainingDraftPredictionItem(
+                    imageId=image.image_id,
+                    status="failed",
+                    layout=image.layout,
+                    regionCount=len(image.regions),
+                    message=str(exc),
+                )
+            )
+            continue
+
+        results.append(
+            TrainingDraftPredictionItem(
+                imageId=image.image_id,
+                status="predicted",
+                layout=updated.layout,
+                confidence=prediction.confidence,
+                regionCount=len(updated.regions),
+            )
+        )
+
+    return TrainingDraftPredictionResponse(
+        predicted=sum(result.status == "predicted" for result in results),
+        skipped=sum(result.status == "skipped" for result in results),
+        failed=sum(result.status == "failed" for result in results),
+        results=results,
+    )
 
 
 @router.delete("/images", response_model=TrainingDeleteResponse, response_model_by_alias=True)
@@ -133,4 +246,6 @@ async def training_status(request: Request) -> TrainingStatusResponse:
         exportInProgress=export_in_progress,
         exportPending=export_pending,
         exportError=export_error,
+        predictionAvailable=getattr(request.app.state, "training_geometry_predictor", None)
+        is not None,
     )

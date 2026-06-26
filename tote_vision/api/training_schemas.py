@@ -41,6 +41,33 @@ class TrainingImageUpdate(BaseModel):
     ready: bool = False
 
 
+class TrainingDraftPredictionRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    image_ids: list[str] | None = Field(default=None, alias="imageIds")
+    overwrite: bool = False
+
+
+class TrainingDraftPredictionItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    image_id: str = Field(alias="imageId")
+    status: str
+    layout: ToteLayout | None = None
+    confidence: float | None = None
+    region_count: int = Field(default=0, alias="regionCount")
+    message: str | None = None
+
+
+class TrainingDraftPredictionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    predicted: int
+    skipped: int
+    failed: int
+    results: list[TrainingDraftPredictionItem]
+
+
 class TrainingImageResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -91,6 +118,7 @@ class TrainingStatusResponse(BaseModel):
     export_in_progress: bool = Field(alias="exportInProgress")
     export_pending: bool = Field(alias="exportPending")
     export_error: str | None = Field(default=None, alias="exportError")
+    prediction_available: bool = Field(default=False, alias="predictionAvailable")
 
 
 class TrainingDeleteResponse(BaseModel):

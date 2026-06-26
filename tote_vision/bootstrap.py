@@ -8,9 +8,39 @@ from tote_vision.adapters.rfdetr import (
     RfdetrToteDetector,
 )
 from tote_vision.application.inspect_empty_tote import InspectEmptyTote
+from tote_vision.application.predict_training_geometry import TrainingGeometryPredictor
 from tote_vision.config import Settings
 from tote_vision.core.decision import DecisionEngine, DecisionPolicy
 from tote_vision.core.geometry import GeometryValidator
+
+
+def build_training_geometry_predictor(settings: Settings) -> TrainingGeometryPredictor:
+    assert settings.rfdetr_checkpoint_path is not None
+
+    image_resolver = LocalImageResolver(settings.artifact_directory)
+    session = RfdetrInferenceSession(
+        checkpoint_path=settings.rfdetr_checkpoint_path,
+        image_resolver=image_resolver,
+        confidence_threshold=settings.rfdetr_confidence_threshold,
+    )
+    tote_detector = RfdetrToteDetector(
+        session,
+        settings.rfdetr_tote_class_id,
+        confidence_threshold=settings.rfdetr_tote_confidence_threshold,
+    )
+    layout_detector = RfdetrLayoutDetector(
+        session,
+        settings.rfdetr_cell_class_id,
+        tote_class_id=settings.rfdetr_tote_class_id,
+        confidence_threshold=settings.rfdetr_cell_confidence_threshold,
+        open_tote_fallback_confidence_threshold=(
+            settings.rfdetr_open_tote_fallback_confidence_threshold
+        ),
+        min_containment=settings.rfdetr_cell_min_containment,
+        duplicate_iou_threshold=settings.rfdetr_cell_duplicate_iou_threshold,
+        max_cell_iou=settings.rfdetr_cell_max_iou,
+    )
+    return TrainingGeometryPredictor(tote_detector, layout_detector)
 
 
 def build_inspector(settings: Settings) -> InspectEmptyTote:

@@ -1,4 +1,9 @@
-import type { InspectionResponse, TrainingImage, TrainingStatus } from "./types";
+import type {
+  InspectionResponse,
+  TrainingDraftPredictionResponse,
+  TrainingImage,
+  TrainingStatus,
+} from "./types";
 
 async function parseJson<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T & { detail?: unknown };
@@ -67,4 +72,15 @@ export async function deleteAllTrainingImages(): Promise<void> {
 export async function getTrainingStatus(): Promise<TrainingStatus> {
   const response = await fetch("/training/status");
   return parseJson<TrainingStatus>(response);
+}
+
+export async function predictDraftTrainingImages(
+  imageIds: string[],
+): Promise<TrainingDraftPredictionResponse> {
+  const response = await fetch("/training/images/predict-drafts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageIds, overwrite: false }),
+  });
+  return parseJson<TrainingDraftPredictionResponse>(response);
 }

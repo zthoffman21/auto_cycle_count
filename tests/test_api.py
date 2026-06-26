@@ -9,7 +9,7 @@ from tote_vision.config import Settings
 from tote_vision.main import create_app
 
 
-def test_inspection_endpoint_uses_wire_contract() -> None:
+def test_inspection_endpoint_reports_unavailable_without_models() -> None:
     client = TestClient(create_app(Settings()))
 
     response = client.post(
@@ -19,17 +19,11 @@ def test_inspection_endpoint_uses_wire_contract() -> None:
         },
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["inspectionId"].startswith("VISION-")
-    assert payload["toteId"] == "UNASSIGNED"
-    assert payload["result"] == "PASS"
-    assert payload["observedLayout"] == "OPEN"
-    assert len(payload["cells"]) == 1
-    assert len(payload["detectedCells"]) == 1
+    assert response.status_code == 503
+    assert "vision inference is not available" in response.json()["detail"]
 
 
-def test_dashboard_upload_runs_inspection(tmp_path: Path) -> None:
+def test_dashboard_upload_reports_unavailable_without_models(tmp_path: Path) -> None:
     settings = Settings(artifact_directory=tmp_path)
     client = TestClient(create_app(settings))
     png = b"\x89PNG\r\n\x1a\n" + b"test-image-payload"
@@ -44,18 +38,15 @@ def test_dashboard_upload_runs_inspection(tmp_path: Path) -> None:
         files={"image": ("tote.png", png, "image/png")},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["result"] == "PASS"
-    assert payload["coordinateSpace"] == "NORMALIZED_100"
-    assert payload["totePolygon"]
-    assert all(cell["polygon"] for cell in payload["cells"])
-    assert client.get(payload["imageUri"]).content == png
+    assert response.status_code == 503
+    assert "vision inference is not available" in response.json()["detail"]
     assert client.get("/").status_code == 200
 
 
 def test_dashboard_rejects_disguised_non_image(tmp_path: Path) -> None:
-    client = TestClient(create_app(Settings(artifact_directory=tmp_path)))
+    app = create_app(Settings(artifact_directory=tmp_path))
+    app.state.inspector = object()
+    client = TestClient(app)
 
     response = client.post(
         "/dashboard/inspect",

@@ -207,7 +207,14 @@ def _normalize_detections(raw: Any) -> tuple[Detection, ...]:
     ):
         box_tuple = tuple(float(value) for value in box)
         mask = masks[index] if masks is not None else None
-        polygon = _mask_polygon(mask) if mask is not None else _box_polygon(box_tuple)
+        if mask is not None:
+            try:
+                polygon = _mask_polygon(mask)
+            except (ImportError, ValueError):
+                polygon = _box_polygon(box_tuple)
+                mask = None
+        else:
+            polygon = _box_polygon(box_tuple)
         normalized.append(
             Detection(
                 class_id=int(class_id),

@@ -144,6 +144,37 @@ def test_open_tote_fallback_uses_high_confidence_tote_when_no_cells_detected(
     assert layout.cells[0].polygon == tote.polygon
 
 
+def test_empty_instance_mask_falls_back_to_box_polygon(tmp_path: Path) -> None:
+    image = tmp_path / "tote.png"
+    image.write_bytes(b"image")
+    session = RfdetrInferenceSession(
+        checkpoint_path=Path("rf-detr-seg-small-totes.pth"),
+        image_resolver=LocalImageResolver(tmp_path),
+        confidence_threshold=0.05,
+        model=SimpleNamespace(
+            predict=lambda image_path, threshold: SimpleNamespace(
+                xyxy=[[5, 5, 95, 95]],
+                confidence=[0.82],
+                class_id=[0],
+                mask=[[[0, 0], [0, 0]]],
+            )
+        ),
+    )
+    request = InspectionRequest(
+        inspection_id="INS-EMPTY-MASK",
+        tote_id="TOTE-1",
+        image_uri="/artifacts/tote.png",
+        station_id="STATION-1",
+        camera_id="CAM-1",
+        captured_at=datetime.now(UTC),
+    )
+
+    tote = asyncio.run(RfdetrToteDetector(session, tote_class_id=0).detect(request))
+
+    assert tote.detected
+    assert tote.polygon == ((5.0, 5.0), (95.0, 5.0), (95.0, 95.0), (5.0, 95.0))
+
+
 def test_open_tote_fallback_rejects_weak_tote_when_no_cells_detected(
     tmp_path: Path,
 ) -> None:

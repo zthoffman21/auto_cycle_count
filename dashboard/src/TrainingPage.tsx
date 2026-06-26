@@ -5,6 +5,7 @@ import {
   getTrainingImage,
   getTrainingStatus,
   listTrainingImages,
+  predictDraftTrainingImages,
   updateTrainingImage,
   uploadTrainingImages,
 } from "./api";
@@ -29,6 +30,12 @@ interface DraggingLabel {
   startClientY: number;
   startOffset: LabelOffset;
   moved: boolean;
+}
+
+interface DraggingGeometryPoint {
+  regionId: string;
+  pointIndex: number;
+  pointerId: number;
 }
 
 function pointsMatch(a: Point[], b: Point[]) {
@@ -174,6 +181,60 @@ function filterImages(images: TrainingImage[], imageFilter: ImageFilter): Traini
   return images;
 }
 
+function regionsWithRegeneratedCells(nextLayout: ToteLayout, sourceRegions: TrainingRegion[]): TrainingRegion[] {
+  const tote = sourceRegions.find((region) => region.regionClass === "tote");
+  if (!tote) return sourceRegions.filter((region) => region.regionClass !== "cell");
+  const oldStates = new Map(
+    sourceRegions
+      .filter((region) => region.regionClass === "cell")
+      .map((region) => [region.cellId, region.cellState] as const),
+  );
+  const oldIds = new Map(
+    sourceRegions
+      .filter((region) => region.regionClass === "cell")
+      .map((region) => [region.cellId, region.regionId] as const),
+  );
+  if (nextLayout === "OPEN") {
+    return [
+      ...sourceRegions.filter(
+        (region) =>
+          region.regionClass !== "cell" &&
+          region.regionClass !== "divider" &&
+          region.regionClass !== "tote",
+      ),
+      tote,
+      {
+        regionId: oldIds.get("A") ?? crypto.randomUUID(),
+        regionClass: "cell",
+        polygon: structuredClone(tote.polygon),
+        cellId: "A",
+        cellState: oldStates.get("A") ?? null,
+      },
+    ];
+  }
+  const dividerTarget = expectedDividers(nextLayout);
+  const dividers = sourceRegions.filter((region) => region.regionClass === "divider");
+  if (!dividerTarget || dividers.length !== dividerTarget) {
+    return sourceRegions.filter((region) => region.regionClass !== "cell");
+  }
+  const generated = generateCellPolygons(tote.polygon, dividers);
+  if (!generated) return sourceRegions;
+  const cells = orderCellPolygons(generated).map((polygon, index) => {
+    const cellId = String.fromCharCode(65 + index);
+    return {
+      regionId: oldIds.get(cellId) ?? crypto.randomUUID(),
+      regionClass: "cell" as const,
+      polygon,
+      cellId,
+      cellState: oldStates.get(cellId) ?? null,
+    };
+  });
+  return [
+    ...sourceRegions.filter((region) => region.regionClass !== "cell"),
+    ...cells,
+  ];
+}
+
 export function TrainingPage() {
   const [images, setImages] = useState<TrainingImage[]>([]);
   const [current, setCurrent] = useState<TrainingImage | null>(null);
@@ -191,6 +252,7 @@ export function TrainingPage() {
     exportInProgress: false,
     exportPending: false,
     exportError: null as string | null,
+    predictionAvailable: false,
   });
   const [saveState, setSaveState] = useState("—");
   const [error, setError] = useState("");
@@ -199,11 +261,15 @@ export function TrainingPage() {
   const [split, setSplit] = useState<DatasetSplit>("train");
   const [layout, setLayout] = useState<ToteLayout>("UNKNOWN");
   const [saving, setSaving] = useState(false);
+  const [predicting, setPredicting] = useState(false);
+  const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [labelOffsets, setLabelOffsets] = useState<Record<string, LabelOffset>>({});
   const [draggingLabelId, setDraggingLabelId] = useState<string | null>(null);
+  const [draggingGeometryPoint, setDraggingGeometryPoint] = useState<DraggingGeometryPoint | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const layerRef = useRef<SVGSVGElement>(null);
   const draggingLabelRef = useRef<DraggingLabel | null>(null);
+  const draggingGeometryRef = useRef<DraggingGeometryPoint | null>(null);
   const suppressLabelClickRef = useRef(false);
 
   useEffect(() => {
@@ -253,6 +319,41 @@ export function TrainingPage() {
     };
   }, []);
 
+  useEffect(() => {
+    function handlePointerMove(event: PointerEvent) {
+      const drag = draggingGeometryRef.current;
+      if (!drag) return;
+      event.preventDefault();
+      const point = canvasPointFromClient(event.clientX, event.clientY);
+      setRegions((currentRegions) => {
+        const moved = currentRegions.map((region) => {
+          if (region.regionId !== drag.regionId) return region;
+          const polygon = region.polygon.map((candidate, index) =>
+            index === drag.pointIndex ? point : candidate,
+          );
+          return { ...region, polygon };
+        });
+        return regionsWithRegeneratedCells(layout, moved);
+      });
+      setDirty(true);
+      setSaveState("dirty");
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      if (draggingGeometryRef.current?.pointerId === event.pointerId) {
+        draggingGeometryRef.current = null;
+        setDraggingGeometryPoint(null);
+      }
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [current, layout]);
+
   async function refreshData(selectImageId?: string) {
     const [listedImages, trainingStatus] = await Promise.all([listTrainingImages(), getTrainingStatus()]);
     setImages(listedImages);
@@ -286,6 +387,8 @@ export function TrainingPage() {
     setTool("idle");
     setLabelOffsets({});
     setDraggingLabelId(null);
+    draggingGeometryRef.current = null;
+    setDraggingGeometryPoint(null);
     setDirty(synchronized.changed || splitChanged);
     setSaveState(synchronized.changed || splitChanged ? "dirty" : "saved");
     setError("");
@@ -520,11 +623,15 @@ export function TrainingPage() {
   }
 
   function canvasPoint(event: React.PointerEvent<SVGSVGElement> | React.MouseEvent<SVGSVGElement>): Point {
+    return canvasPointFromClient("clientX" in event ? event.clientX : 0, "clientY" in event ? event.clientY : 0);
+  }
+
+  function canvasPointFromClient(clientX: number, clientY: number): Point {
     const svg = layerRef.current;
     if (!svg || !current) return [0, 0];
     const point = svg.createSVGPoint();
-    point.x = "clientX" in event ? event.clientX : 0;
-    point.y = "clientY" in event ? event.clientY : 0;
+    point.x = clientX;
+    point.y = clientY;
     const transformed = point.matrixTransform(svg.getScreenCTM()?.inverse());
     return [
       Math.max(0, Math.min(current.width, transformed.x)),
@@ -597,6 +704,30 @@ export function TrainingPage() {
     }
   }
 
+  async function handlePredictUnsaved() {
+    const draftIds = visibleImages.filter((image) => !image.ready).map((image) => image.imageId);
+    if (!draftIds.length) {
+      setProgress("No unsaved images to predict.");
+      return;
+    }
+    if (dirty && !window.confirm("Discard unsaved annotation changes before predicting drafts?")) {
+      return;
+    }
+    setPredicting(true);
+    setProgress(`Predicting geometry for ${draftIds.length} unsaved image(s)...`);
+    try {
+      const result = await predictDraftTrainingImages(draftIds);
+      setProgress(
+        `Predicted ${result.predicted}, skipped ${result.skipped}, failed ${result.failed}.`,
+      );
+      await refreshData(current?.imageId);
+    } catch (predictError) {
+      setProgress(predictError instanceof Error ? predictError.message : "Prediction failed");
+    } finally {
+      setPredicting(false);
+    }
+  }
+
   async function handleSave() {
     if (!current) return;
     setError("");
@@ -664,6 +795,8 @@ export function TrainingPage() {
     setLayout("UNKNOWN");
     setLabelOffsets({});
     setDraggingLabelId(null);
+    draggingGeometryRef.current = null;
+    setDraggingGeometryPoint(null);
     setSaveState("saved");
     setError("");
     clearDraft();
@@ -676,6 +809,8 @@ export function TrainingPage() {
     setTool("idle");
     setLabelOffsets({});
     clearDraft();
+    draggingGeometryRef.current = null;
+    setDraggingGeometryPoint(null);
     markDirty();
   }
 
@@ -687,6 +822,8 @@ export function TrainingPage() {
     setSelectedRegionId(null);
     setLabelOffsets({});
     setDraggingLabelId(null);
+    draggingGeometryRef.current = null;
+    setDraggingGeometryPoint(null);
     setTool("idle");
     clearDraft();
     markDirty();
@@ -708,6 +845,8 @@ export function TrainingPage() {
     setSelectedRegionId(null);
     setLabelOffsets({});
     setDraggingLabelId(null);
+    draggingGeometryRef.current = null;
+    setDraggingGeometryPoint(null);
     setTool("idle");
     clearDraft();
     markDirty();
@@ -757,6 +896,10 @@ export function TrainingPage() {
   const visibleImages = useMemo(() => {
     return filterImages(images, imageFilter);
   }, [imageFilter, images]);
+
+  const visibleDraftCount = useMemo(() => {
+    return visibleImages.filter((image) => !image.ready).length;
+  }, [visibleImages]);
 
   const guideText = !wizard.layoutSelected
     ? {
@@ -823,6 +966,28 @@ export function TrainingPage() {
               Delete all
             </button>
           </div>
+          {status.predictionAvailable && imageFilterCounts.draft > 0 ? (
+            <div className="prediction-assist">
+              <label>
+                <input
+                  checked={predictionEnabled}
+                  onChange={(event) => setPredictionEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Prediction assist</span>
+              </label>
+              {predictionEnabled ? (
+                <button
+                  className="predict-drafts-action"
+                  disabled={!visibleDraftCount || predicting}
+                  onClick={() => void handlePredictUnsaved()}
+                  type="button"
+                >
+                  {predicting ? "Predicting..." : `Predict unsaved ${visibleDraftCount}`}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="upload-progress">{progress}</div>
           <div className="image-filter" aria-label="Source image filter">
             <button
@@ -947,16 +1112,43 @@ export function TrainingPage() {
                       );
                     if (openCellHidden) return null;
                     return region.regionClass === "divider" ? (
-                      <line
-                        key={region.regionId}
-                        className={`annotation-region divider ${
-                          region.regionId === selectedRegionId ? "selected" : ""
-                        }`}
-                        x1={region.polygon[0][0]}
-                        x2={region.polygon[1][0]}
-                        y1={region.polygon[0][1]}
-                        y2={region.polygon[1][1]}
-                      />
+                      <g key={region.regionId}>
+                        <line
+                          className={`annotation-region divider ${
+                            region.regionId === selectedRegionId ? "selected" : ""
+                          }`}
+                          x1={region.polygon[0][0]}
+                          x2={region.polygon[1][0]}
+                          y1={region.polygon[0][1]}
+                          y2={region.polygon[1][1]}
+                        />
+                        {region.polygon.map((point, pointIndex) => (
+                          <g
+                            className={`geometry-handle-group ${
+                              draggingGeometryPoint?.regionId === region.regionId &&
+                              draggingGeometryPoint.pointIndex === pointIndex
+                                ? "dragging"
+                                : ""
+                            }`}
+                            key={`${region.regionId}-${pointIndex}`}
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              const drag = {
+                                regionId: region.regionId,
+                                pointIndex,
+                                pointerId: event.pointerId,
+                              };
+                              draggingGeometryRef.current = drag;
+                              setDraggingGeometryPoint(drag);
+                              event.currentTarget.setPointerCapture(event.pointerId);
+                            }}
+                          >
+                            <circle className="geometry-handle-hitbox" cx={point[0]} cy={point[1]} r="75" />
+                            <circle className="geometry-handle" cx={point[0]} cy={point[1]} r="50" />
+                          </g>
+                        ))}
+                      </g>
                     ) : (
                       <g key={region.regionId}>
                         {(() => {
@@ -989,6 +1181,34 @@ export function TrainingPage() {
                             {regionLabel(layout, region)}
                           </text>
                         ) : null}
+                        {region.regionClass === "tote"
+                          ? region.polygon.map((point, pointIndex) => (
+                              <g
+                                className={`geometry-handle-group ${
+                                  draggingGeometryPoint?.regionId === region.regionId &&
+                                  draggingGeometryPoint.pointIndex === pointIndex
+                                    ? "dragging"
+                                    : ""
+                                }`}
+                                key={`${region.regionId}-${pointIndex}`}
+                                onPointerDown={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  const drag = {
+                                    regionId: region.regionId,
+                                    pointIndex,
+                                    pointerId: event.pointerId,
+                                  };
+                                  draggingGeometryRef.current = drag;
+                                  setDraggingGeometryPoint(drag);
+                                  event.currentTarget.setPointerCapture(event.pointerId);
+                                }}
+                              >
+                                <circle className="geometry-handle-hitbox" cx={point[0]} cy={point[1]} r="75" />
+                                <circle className="geometry-handle" cx={point[0]} cy={point[1]} r="50" />
+                              </g>
+                            ))
+                          : null}
                             </>
                           );
                         })()}

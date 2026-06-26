@@ -1,6 +1,6 @@
 ﻿from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from tote_vision.api.schemas import (
     EmptyToteInspectionRequest,
@@ -12,7 +12,13 @@ router = APIRouter()
 
 
 def get_inspector(request: Request) -> InspectEmptyTote:
-    return request.app.state.inspector
+    inspector = request.app.state.inspector
+    if inspector is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="vision inference is not available; configure trained model paths",
+        )
+    return inspector
 
 
 @router.get("/health/live", tags=["health"])

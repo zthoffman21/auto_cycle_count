@@ -37,6 +37,23 @@ export interface TrainingStatus {
   exportInProgress: boolean;
   exportPending: boolean;
   exportError: string | null;
+  predictionAvailable: boolean;
+}
+
+export interface TrainingDraftPredictionItem {
+  imageId: string;
+  status: "predicted" | "skipped" | "failed";
+  layout: ToteLayout | null;
+  confidence: number | null;
+  regionCount: number;
+  message: string | null;
+}
+
+export interface TrainingDraftPredictionResponse {
+  predicted: number;
+  skipped: number;
+  failed: number;
+  results: TrainingDraftPredictionItem[];
 }
 
 export interface InspectionCell {
@@ -69,4 +86,5 @@ export interface InspectionResponse {
   geometry: { valid: boolean; issues: string[] } | null;
   modelVersions: Record<string, string>;
   decisionVersion: string;
+  metadata: Record<string, unknown>;
 }

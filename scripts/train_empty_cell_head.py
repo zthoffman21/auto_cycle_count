@@ -13,10 +13,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--validation-fraction", type=float, default=0.2)
+    parser.add_argument("--early-stopping-patience", type=int, default=50)
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
+    parser.add_argument("--no-early-stopping", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda")
     return parser.parse_args()
@@ -53,40 +56,57 @@ def main() -> None:
 
     train_features = train_features.to(device)
     train_labels = train_labels.to(device)
+    validation_features = validation_features.to(device)
+    validation_labels = validation_labels.to(device)
+    best_accuracy = -1.0
+    best_epoch = 0
+    best_state = {
+        "weight": head.weight.detach().cpu().contiguous().clone(),
+        "bias": head.bias.detach().cpu().contiguous().clone(),
+    }
+    epochs_since_improvement = 0
     for epoch in range(args.epochs):
         head.train()
         optimizer.zero_grad(set_to_none=True)
         loss = criterion(head(train_features), train_labels)
         loss.backward()
         optimizer.step()
-        if epoch == 0 or (epoch + 1) % 25 == 0:
-            accuracy = _accuracy(
-                head,
-                validation_features.to(device),
-                validation_labels.to(device),
-                torch,
-            )
+        accuracy = _accuracy(head, validation_features, validation_labels, torch)
+        if accuracy > best_accuracy + args.early_stopping_min_delta:
+            best_accuracy = accuracy
+            best_epoch = epoch + 1
+            epochs_since_improvement = 0
+            best_state = {
+                "weight": head.weight.detach().cpu().contiguous().clone(),
+                "bias": head.bias.detach().cpu().contiguous().clone(),
+            }
+        else:
+            epochs_since_improvement += 1
+        print(
+            f"epoch={epoch + 1} loss={loss.item():.4f} "
+            f"validation_accuracy={accuracy:.4f} best_validation_accuracy={best_accuracy:.4f}"
+        )
+        if (
+            not args.no_early_stopping
+            and args.early_stopping_patience > 0
+            and epochs_since_improvement >= args.early_stopping_patience
+        ):
             print(
-                f"epoch={epoch + 1} loss={loss.item():.4f} "
-                f"validation_accuracy={accuracy:.4f}"
+                f"early_stopping epoch={epoch + 1} "
+                f"best_epoch={best_epoch} patience={args.early_stopping_patience}"
             )
+            break
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     save_file(
-        {
-            "weight": head.weight.detach().cpu().contiguous(),
-            "bias": head.bias.detach().cpu().contiguous(),
-        },
+        best_state,
         args.output,
         metadata={"labels": ",".join(LABELS), "backbone": args.model.name},
     )
-    final_accuracy = _accuracy(
-        head,
-        validation_features.to(device),
-        validation_labels.to(device),
-        torch,
+    print(
+        f"saved={args.output} best_epoch={best_epoch} "
+        f"validation_accuracy={best_accuracy:.4f}"
     )
-    print(f"saved={args.output} validation_accuracy={final_accuracy:.4f}")
 
 
 def _collect_samples(dataset: Path) -> list[tuple[Path, int]]:

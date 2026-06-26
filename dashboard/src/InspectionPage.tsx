@@ -156,6 +156,11 @@ function ResultCard({ item }: { item: BatchItem }) {
     result && methodNames && selectedMethod && result.methodResults
       ? (result.methodResults[selectedMethod] ?? result.cells)
       : (result?.cells ?? []);
+  const errorType =
+    typeof result?.metadata?.errorType === "string" ? result.metadata.errorType : null;
+  const errorMessage =
+    typeof result?.metadata?.errorMessage === "string" ? result.metadata.errorMessage : null;
+  const inferenceFailed = result?.reasonCode === "INFERENCE_ERROR";
   return (
     <article className="result-card panel">
       <button
@@ -269,6 +274,11 @@ function ResultCard({ item }: { item: BatchItem }) {
                   {result.geometry.issues.map((issue) => <li key={issue}>{issue}</li>)}
                 </ul>
               ) : null}
+              {inferenceFailed && (errorType || errorMessage) ? (
+                <ul className="geometry-issues">
+                  <li>{[errorType, errorMessage].filter(Boolean).join(": ")}</li>
+                </ul>
+              ) : null}
             </article>
 
             <article className="panel cells-panel">
@@ -329,11 +339,22 @@ function ResultCard({ item }: { item: BatchItem }) {
               <ol>
                 {[
                   ["Image accepted", result.imageUri],
-                  ["Tote ROI detection", result.modelVersions.toteDetector || "not run"],
+                  [
+                    "Tote ROI detection",
+                    result.modelVersions.toteDetector || (inferenceFailed ? "failed" : "not run"),
+                  ],
                   ["Cell layout detection", result.modelVersions.layoutDetector || "not run"],
-                  ["Geometry validation", result.geometry?.valid ? "valid" : "invalid"],
+                  [
+                    "Geometry validation",
+                    result.geometry ? (result.geometry.valid ? "valid" : "invalid") : "not run",
+                  ],
                   ["Cell classification", result.modelVersions.cellClassifier || "not run"],
-                  ["Prediction assembled", `${result.detectedCells.length} cells`],
+                  [
+                    "Prediction assembled",
+                    inferenceFailed && errorType
+                      ? `failed: ${errorType}`
+                      : `${result.detectedCells.length} cells`,
+                  ],
                 ].map(([name, detail]) => (
                   <li key={name}>
                     {name}
