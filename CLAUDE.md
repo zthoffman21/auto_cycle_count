@@ -79,7 +79,6 @@ React/TypeScript SPA in `dashboard/` built with Vite. Provides an inspection das
 Standalone training scripts in `scripts/`:
 - `train_rfdetr.py` — RF-DETR tote and cell segmentation
 - `train_empty_cell_head.py` — binary DINOv2 cell classifier
-- `train_patch_anomaly_detector.py` — one-class anomaly detector (optional)
 
 Training annotations stored in `data/training/`, inspection artifacts in `data/artifacts/`.
 

@@ -17,13 +17,6 @@ param(
 
     [string]$Dinov2Classifier = "empty-cell-head.safetensors",
 
-    [string]$PatchAnomalyModel = "patch-anomaly.safetensors",
-
-    [string]$GroundingDinoModel = "grounding-dino-base",
-
-    [ValidateRange(0.0, 1.0)]
-    [double]$GroundingDinoBoxThreshold = 0.25,
-
     [ValidateRange(0, 600)]
     [int]$HealthTimeoutSeconds = 120
 )
@@ -125,17 +118,6 @@ $runArguments = @(
     "--env", "CYCLE_COUNT_DINOV2_CLASSIFIER_PATH=/models/$Dinov2Classifier",
     "--env", "CYCLE_COUNT_VISION_DEVICE=cuda"
 )
-$patchAnomalyPath = Join-Path $ModelDirectory $PatchAnomalyModel
-if (Test-Path $patchAnomalyPath) {
-    $runArguments += "--env", "CYCLE_COUNT_PATCH_ANOMALY_MODEL_PATH=/models/$PatchAnomalyModel"
-    Write-Host "Patch anomaly model found."
-}
-$groundingDinoPath = Join-Path $ModelDirectory $GroundingDinoModel
-if (Test-Path $groundingDinoPath) {
-    $runArguments += "--env", "CYCLE_COUNT_GROUNDING_DINO_MODEL_PATH=/models/$GroundingDinoModel"
-    $runArguments += "--env", "CYCLE_COUNT_GROUNDING_DINO_BOX_THRESHOLD=$GroundingDinoBoxThreshold"
-    Write-Host "GroundingDINO model found (box_threshold=$GroundingDinoBoxThreshold)."
-}
 $runArguments += $ImageName
 Invoke-Docker -DockerArguments $runArguments | Out-Null
 

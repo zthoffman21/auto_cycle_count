@@ -114,29 +114,7 @@ threshold remains `0.50`. These can be overridden with `CYCLE_COUNT_RFDETR_CONFI
 docker run --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:latest python scripts/train_empty_cell_head.py --dataset data/training/exports/cells --model models/dinov2-vits14 --output models/empty-cell-head.safetensors
 ```
 
-## 8. Train the patch anomaly detector (optional — enables comparison mode)
-
-```powershell
-docker run --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:latest python scripts/train_patch_anomaly_detector.py --dataset data/training/exports/cells --model models/dinov2-vits14 --output models/patch-anomaly.safetensors
-```
-
-This trains a one-class anomaly detector that learns only what an empty cell looks like. Unlike
-the binary classifier, it detects novel objects that were never in the training set by measuring
-how far each image patch deviates from the empty-cell distribution. When
-`CYCLE_COUNT_PATCH_ANOMALY_MODEL_PATH` is set, the dashboard shows a method toggle so you can
-compare both classifiers on the same image.
-
-## 9. Download the GroundingDINO model (optional — enables comparison mode)
-
-```powershell
-docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace --env HF_HOME=/tmp/huggingface --env XDG_CACHE_HOME=/tmp cycle-count-vision:latest hf download IDEA-Research/grounding-dino-base --local-dir models/grounding-dino-base
-```
-
-This downloads the zero-shot object detection model (~700 MB). No training is required — GroundingDINO is used as-is with the text prompt `"object."`. When `CYCLE_COUNT_GROUNDING_DINO_MODEL_PATH` is set, the dashboard shows a method toggle that includes `grounding_dino` alongside the other classifiers.
-
-Tune `CYCLE_COUNT_GROUNDING_DINO_BOX_THRESHOLD` (default `0.25`) if you get too many false positives (raise it) or miss real items (lower it).
-
-## 10. Verify model artifacts
+## 8. Verify model artifacts
 
 ```powershell
 Get-ChildItem -Recurse models
@@ -152,7 +130,7 @@ models/dinov2-vits14/preprocessor_config.json
 models/empty-cell-head.safetensors
 ```
 
-## 11. Start
+## 9. Start
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1

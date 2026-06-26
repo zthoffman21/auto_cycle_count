@@ -1,9 +1,7 @@
 ﻿from __future__ import annotations
 
 from tote_vision.adapters.dinov2 import Dinov2CellClassifier
-from tote_vision.adapters.grounding_dino import GroundingDinoCellClassifier
 from tote_vision.adapters.image_resolver import LocalImageResolver
-from tote_vision.adapters.patch_anomaly import PatchAnomalyCellClassifier
 from tote_vision.adapters.rfdetr import (
     RfdetrInferenceSession,
     RfdetrLayoutDetector,
@@ -54,24 +52,6 @@ def build_inspector(settings: Settings) -> InspectEmptyTote:
             classifier_name="linear_probe",
         ),
     }
-    if settings.patch_anomaly_model_path is not None:
-        cell_classifiers["patch_anomaly"] = PatchAnomalyCellClassifier(
-            model_path=settings.dinov2_model_path,
-            anomaly_model_path=settings.patch_anomaly_model_path,
-            image_resolver=image_resolver,
-            device=settings.vision_device,
-            empty_threshold=settings.empty_threshold,
-            non_empty_threshold=settings.non_empty_threshold,
-        )
-    if settings.grounding_dino_model_path is not None:
-        cell_classifiers["grounding_dino"] = GroundingDinoCellClassifier(
-            model_path=settings.grounding_dino_model_path,
-            image_resolver=image_resolver,
-            device=settings.vision_device,
-            empty_threshold=settings.empty_threshold,
-            non_empty_threshold=settings.non_empty_threshold,
-            box_threshold=settings.grounding_dino_box_threshold,
-        )
 
     return InspectEmptyTote(
         tote_detector=tote_detector,

@@ -32,9 +32,6 @@ class Settings(BaseSettings):
     rfdetr_cell_max_iou: float = Field(default=0.15, ge=0, le=1)
     dinov2_model_path: Path | None = None
     dinov2_classifier_path: Path | None = None
-    patch_anomaly_model_path: Path | None = None
-    grounding_dino_model_path: Path | None = None
-    grounding_dino_box_threshold: float = Field(default=0.25, ge=0, le=1)
     vision_device: str = "cuda"
     training_directory: Path = Path("data/training")
 
