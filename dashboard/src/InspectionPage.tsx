@@ -410,10 +410,6 @@ export function InspectionPage() {
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">WES engineering tools</p>
-          <h1>Vision inspection console</h1>
-        </div>
         <div className="top-actions">
           <a href="/train">Training data</a>
         </div>

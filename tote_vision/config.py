@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     rfdetr_confidence_threshold: float = Field(default=0.05, ge=0, le=1)
     rfdetr_tote_confidence_threshold: float = Field(default=0.10, ge=0, le=1)
     rfdetr_cell_confidence_threshold: float = Field(default=0.50, ge=0, le=1)
+    rfdetr_open_tote_fallback_confidence_threshold: float = Field(default=0.70, ge=0, le=1)
     rfdetr_tote_class_id: int = Field(default=0, ge=0)
     rfdetr_cell_class_id: int = Field(default=1, ge=0)
     rfdetr_cell_min_containment: float = Field(default=0.9, ge=0, le=1)

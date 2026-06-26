@@ -114,6 +114,7 @@ class RfdetrLayoutDetector:
         cell_class_id: int,
         tote_class_id: int = 0,
         confidence_threshold: float = 0.5,
+        open_tote_fallback_confidence_threshold: float = 0.7,
         min_containment: float = 0.9,
         duplicate_iou_threshold: float = 0.7,
         max_cell_iou: float = 0.15,
@@ -122,6 +123,7 @@ class RfdetrLayoutDetector:
         self._cell_class_id = cell_class_id
         self._tote_class_id = tote_class_id
         self._confidence_threshold = confidence_threshold
+        self._open_tote_fallback_confidence_threshold = (open_tote_fallback_confidence_threshold)
         self._min_containment = min_containment
         self._duplicate_iou_threshold = duplicate_iou_threshold
         self._max_cell_iou = max_cell_iou
@@ -151,6 +153,19 @@ class RfdetrLayoutDetector:
                     cells.append(constrained)
         cells = _suppress_duplicates(cells, self._duplicate_iou_threshold)
         ordered = _reading_order(cells)
+        if (
+            not ordered
+            and tote.detected
+            and tote.polygon is not None
+            and tote.confidence >= self._open_tote_fallback_confidence_threshold
+        ):
+            return LayoutDetection(
+                layout=ToteLayout.OPEN,
+                confidence=tote.confidence,
+                cells=(CellGeometry(cell_id="A", polygon=tote.polygon),),
+                model_name="rf-detr-constrained-cell-segmentation",
+                model_version=self._session.version,
+            )
         layout = {
             1: ToteLayout.OPEN,
             2: ToteLayout.TWO_CELL,

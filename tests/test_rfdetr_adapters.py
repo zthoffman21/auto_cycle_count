@@ -34,6 +34,19 @@ class FakeRfdetrModel:
         )
 
 
+class FakeToteOnlyModel:
+    def __init__(self, confidence: float) -> None:
+        self.confidence = confidence
+
+    def predict(self, image_path: str, threshold: float):
+        return SimpleNamespace(
+            xyxy=[[5, 5, 95, 95]],
+            confidence=[self.confidence],
+            class_id=[0],
+            mask=None,
+        )
+
+
 def test_cells_are_constrained_deduplicated_and_inferred_without_expected_layout(
     tmp_path: Path,
 ) -> None:
@@ -99,3 +112,65 @@ def test_open_layout_uses_the_tote_polygon_for_the_cell(tmp_path: Path) -> None:
 
     assert layout.layout is ToteLayout.OPEN
     assert layout.cells[0].polygon == tote.polygon
+
+
+def test_open_tote_fallback_uses_high_confidence_tote_when_no_cells_detected(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "tote.png"
+    image.write_bytes(b"image")
+    session = RfdetrInferenceSession(
+        checkpoint_path=Path("rf-detr-seg-small-totes.pth"),
+        image_resolver=LocalImageResolver(tmp_path),
+        confidence_threshold=0.05,
+        model=FakeToteOnlyModel(confidence=0.82),
+    )
+    request = InspectionRequest(
+        inspection_id="INS-FALLBACK",
+        tote_id="TOTE-1",
+        image_uri="/artifacts/tote.png",
+        station_id="STATION-1",
+        camera_id="CAM-1",
+        captured_at=datetime.now(UTC),
+    )
+
+    tote = asyncio.run(RfdetrToteDetector(session, tote_class_id=0).detect(request))
+    layout = asyncio.run(RfdetrLayoutDetector(session, cell_class_id=1).detect(request, tote))
+
+    assert tote.detected
+    assert layout.layout is ToteLayout.OPEN
+    assert layout.confidence == tote.confidence
+    assert layout.cells[0].cell_id == "A"
+    assert layout.cells[0].polygon == tote.polygon
+
+
+def test_open_tote_fallback_rejects_weak_tote_when_no_cells_detected(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "tote.png"
+    image.write_bytes(b"image")
+    session = RfdetrInferenceSession(
+        checkpoint_path=Path("rf-detr-seg-small-totes.pth"),
+        image_resolver=LocalImageResolver(tmp_path),
+        confidence_threshold=0.05,
+        model=FakeToteOnlyModel(confidence=0.62),
+    )
+    request = InspectionRequest(
+        inspection_id="INS-NO-FALLBACK",
+        tote_id="TOTE-1",
+        image_uri="/artifacts/tote.png",
+        station_id="STATION-1",
+        camera_id="CAM-1",
+        captured_at=datetime.now(UTC),
+    )
+
+    tote = asyncio.run(
+        RfdetrToteDetector(session, tote_class_id=0, confidence_threshold=0.1).detect(
+            request
+        )
+    )
+    layout = asyncio.run(RfdetrLayoutDetector(session, cell_class_id=1).detect(request, tote))
+
+    assert tote.detected
+    assert layout.layout is ToteLayout.UNKNOWN
+    assert layout.cells == ()

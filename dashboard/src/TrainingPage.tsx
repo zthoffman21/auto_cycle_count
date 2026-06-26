@@ -789,10 +789,6 @@ export function TrainingPage() {
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">WES engineering tools</p>
-          <h1>Training data studio</h1>
-        </div>
         <nav className="page-nav">
           <a href="/">Inspection console</a>
           <a className="active" href="/train">

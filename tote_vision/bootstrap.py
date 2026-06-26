@@ -36,6 +36,9 @@ def build_inspector(settings: Settings) -> InspectEmptyTote:
         settings.rfdetr_cell_class_id,
         tote_class_id=settings.rfdetr_tote_class_id,
         confidence_threshold=settings.rfdetr_cell_confidence_threshold,
+        open_tote_fallback_confidence_threshold=(
+            settings.rfdetr_open_tote_fallback_confidence_threshold
+        ),
         min_containment=settings.rfdetr_cell_min_containment,
         duplicate_iou_threshold=settings.rfdetr_cell_duplicate_iou_threshold,
         max_cell_iou=settings.rfdetr_cell_max_iou,
