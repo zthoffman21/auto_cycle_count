@@ -11,6 +11,7 @@ import {
 import type { CellState, DatasetSplit, Point, ToteLayout, TrainingImage, TrainingRegion } from "./types";
 
 type ToolMode = "idle" | "tote-polygon" | "tote-box" | "divider-line";
+type ImageFilter = "all" | "ready" | "draft";
 
 interface DraftBox {
   start: Point;
@@ -153,6 +154,26 @@ function nextCellState(cellState: CellState | null): CellState {
   return "EMPTY";
 }
 
+function suggestedSplitForSelection(image: TrainingImage, images: TrainingImage[]): DatasetSplit {
+  if (image.ready || image.split !== "train" || image.createdAt !== image.updatedAt) {
+    return image.split;
+  }
+  const readyImages = images.filter(
+    (candidate) => candidate.ready && candidate.imageId !== image.imageId,
+  );
+  const train = readyImages.filter((candidate) => candidate.split === "train").length;
+  const valid = readyImages.filter((candidate) => candidate.split === "valid").length;
+  const trainValidTotal = train + valid + 1;
+  const targetValid = Math.floor(trainValidTotal / 5);
+  return valid < targetValid ? "valid" : "train";
+}
+
+function filterImages(images: TrainingImage[], imageFilter: ImageFilter): TrainingImage[] {
+  if (imageFilter === "ready") return images.filter((image) => image.ready);
+  if (imageFilter === "draft") return images.filter((image) => !image.ready);
+  return images;
+}
+
 export function TrainingPage() {
   const [images, setImages] = useState<TrainingImage[]>([]);
   const [current, setCurrent] = useState<TrainingImage | null>(null);
@@ -174,6 +195,7 @@ export function TrainingPage() {
   const [saveState, setSaveState] = useState("—");
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
+  const [imageFilter, setImageFilter] = useState<ImageFilter>("all");
   const [split, setSplit] = useState<DatasetSplit>("train");
   const [layout, setLayout] = useState<ToteLayout>("UNKNOWN");
   const [saving, setSaving] = useState(false);
@@ -238,28 +260,34 @@ export function TrainingPage() {
     if (selectImageId) {
       const selected = listedImages.find((item) => item.imageId === selectImageId);
       if (selected) {
-        await selectImage(selected.imageId, false);
+        await selectImage(selected.imageId, false, listedImages);
       }
     }
   }
 
-  async function selectImage(imageId: string, promptOnDirty = true) {
+  async function selectImage(
+    imageId: string,
+    promptOnDirty = true,
+    sourceImages: TrainingImage[] = images,
+  ) {
     if (dirty && promptOnDirty && !window.confirm("Discard unsaved annotation changes?")) return;
     const image = await getTrainingImage(imageId);
     const nextLayout = image.layout;
     const synchronized = synchronizeOpenArea(nextLayout, image.regions);
+    const nextSplit = suggestedSplitForSelection(image, sourceImages);
+    const splitChanged = nextSplit !== image.split;
     setCurrent(image);
     setRegions(synchronized.regions);
     setSelectedRegionId(null);
-    setSplit(image.split);
+    setSplit(nextSplit);
     setLayout(nextLayout);
     setDraftPoints([]);
     setDraftBox(null);
     setTool("idle");
     setLabelOffsets({});
     setDraggingLabelId(null);
-    setDirty(synchronized.changed);
-    setSaveState(synchronized.changed ? "dirty" : "saved");
+    setDirty(synchronized.changed || splitChanged);
+    setSaveState(synchronized.changed || splitChanged ? "dirty" : "saved");
     setError("");
   }
 
@@ -343,6 +371,43 @@ export function TrainingPage() {
       complete,
     };
   }, [layout, regions]);
+
+  useEffect(() => {
+    if (!current || !wizard.layoutSelected) {
+      if (tool !== "idle") {
+        setTool("idle");
+        clearDraft();
+      }
+      return;
+    }
+    if (!wizard.toteComplete) {
+      const nextTool = shape === "polygon" ? "tote-polygon" : "tote-box";
+      if (tool !== nextTool) {
+        setTool(nextTool);
+        clearDraft();
+      }
+      return;
+    }
+    if (!wizard.dividersComplete && wizard.dividerTarget > 0) {
+      if (tool !== "divider-line") {
+        setTool("divider-line");
+        clearDraft();
+      }
+      return;
+    }
+    if (tool !== "idle") {
+      setTool("idle");
+      clearDraft();
+    }
+  }, [
+    current,
+    shape,
+    tool,
+    wizard.dividerTarget,
+    wizard.dividersComplete,
+    wizard.layoutSelected,
+    wizard.toteComplete,
+  ]);
 
   function clearDraft() {
     setDraftPoints([]);
@@ -536,10 +601,11 @@ export function TrainingPage() {
     if (!current) return;
     setError("");
     setSaving(true);
-    const currentIndex = images.findIndex((image) => image.imageId === current.imageId);
+    const navigationImages = filterImages(images, imageFilter);
+    const currentIndex = navigationImages.findIndex((image) => image.imageId === current.imageId);
     const nextImageId =
-      currentIndex >= 0 && currentIndex < images.length - 1
-        ? images[currentIndex + 1].imageId
+      currentIndex >= 0 && currentIndex < navigationImages.length - 1
+        ? navigationImages[currentIndex + 1].imageId
         : current.imageId;
     try {
       const saved = await updateTrainingImage(current.imageId, {
@@ -613,12 +679,35 @@ export function TrainingPage() {
     markDirty();
   }
 
-  function resetGeometry() {
-    if (regions.length && !window.confirm("Clear the tote, divider, and generated cell geometry?")) {
+  function resetOutline() {
+    if (regions.length && !window.confirm("Clear the tote outline, dividers, and cell labels?")) {
       return;
     }
     setRegions([]);
     setSelectedRegionId(null);
+    setLabelOffsets({});
+    setDraggingLabelId(null);
+    setTool("idle");
+    clearDraft();
+    markDirty();
+  }
+
+  function resetDividers() {
+    const hasDividerOrCells = regions.some(
+      (region) => region.regionClass === "divider" || region.regionClass === "cell",
+    );
+    if (
+      hasDividerOrCells &&
+      !window.confirm("Clear divider lines and generated cell labels for this image?")
+    ) {
+      return;
+    }
+    setRegions((currentRegions) =>
+      currentRegions.filter((region) => region.regionClass === "tote"),
+    );
+    setSelectedRegionId(null);
+    setLabelOffsets({});
+    setDraggingLabelId(null);
     setTool("idle");
     clearDraft();
     markDirty();
@@ -648,6 +737,26 @@ export function TrainingPage() {
       [x1, y1],
     ] as Point[];
   }, [draftBox, draftPoints, tool]);
+
+  const splitSummary = useMemo(() => {
+    const readyImages = images.filter((image) => image.ready);
+    const train = readyImages.filter((image) => image.split === "train").length;
+    const valid = readyImages.filter((image) => image.split === "valid").length;
+    const test = readyImages.filter((image) => image.split === "test").length;
+    const trainValidTotal = train + valid;
+    const trainPercent = trainValidTotal ? Math.round((train / trainValidTotal) * 100) : 0;
+    const validPercent = trainValidTotal ? 100 - trainPercent : 0;
+    return { train, valid, test, trainPercent, validPercent };
+  }, [images]);
+
+  const imageFilterCounts = useMemo(() => {
+    const ready = images.filter((image) => image.ready).length;
+    return { all: images.length, ready, draft: images.length - ready };
+  }, [images]);
+
+  const visibleImages = useMemo(() => {
+    return filterImages(images, imageFilter);
+  }, [imageFilter, images]);
 
   const guideText = !wizard.layoutSelected
     ? {
@@ -719,8 +828,31 @@ export function TrainingPage() {
             </button>
           </div>
           <div className="upload-progress">{progress}</div>
+          <div className="image-filter" aria-label="Source image filter">
+            <button
+              className={imageFilter === "all" ? "active" : ""}
+              onClick={() => setImageFilter("all")}
+              type="button"
+            >
+              All {imageFilterCounts.all}
+            </button>
+            <button
+              className={imageFilter === "ready" ? "active" : ""}
+              onClick={() => setImageFilter("ready")}
+              type="button"
+            >
+              Saved {imageFilterCounts.ready}
+            </button>
+            <button
+              className={imageFilter === "draft" ? "active" : ""}
+              onClick={() => setImageFilter("draft")}
+              type="button"
+            >
+              Unsaved {imageFilterCounts.draft}
+            </button>
+          </div>
           <div className="image-list">
-            {images.map((image) => (
+            {visibleImages.map((image) => (
               <button
                 key={image.imageId}
                 className={`image-item ${current?.imageId === image.imageId ? "active" : ""}`}
@@ -737,6 +869,9 @@ export function TrainingPage() {
                 <i className={`ready-dot ${image.ready ? "ready" : ""}`} />
               </button>
             ))}
+            {!visibleImages.length ? (
+              <div className="image-list-empty">No source images match this filter.</div>
+            ) : null}
           </div>
           <div className="dataset-status">
             <p className="step-label">export status</p>
@@ -744,6 +879,29 @@ export function TrainingPage() {
               <p className="export-note">Export is rebuilding in the background.</p>
             ) : null}
             {status.exportError ? <p className="export-note error">{status.exportError}</p> : null}
+            <div className="split-summary">
+              <div className="split-summary-heading">
+                <span>train / valid</span>
+                <strong>
+                  {splitSummary.trainPercent}/{splitSummary.validPercent}
+                </strong>
+              </div>
+              <div className="split-meter" aria-label="Train and validation split">
+                <span
+                  className="split-meter-train"
+                  style={{ width: `${splitSummary.trainPercent}%` }}
+                />
+                <span
+                  className="split-meter-valid"
+                  style={{ width: `${splitSummary.validPercent}%` }}
+                />
+              </div>
+              <div className="split-counts">
+                <span>Train {splitSummary.train}</span>
+                <span>Valid {splitSummary.valid}</span>
+                {splitSummary.test ? <span>Test {splitSummary.test}</span> : null}
+              </div>
+            </div>
             <dl>
               <div>
                 <dt>Ready</dt>
@@ -764,9 +922,6 @@ export function TrainingPage() {
         <section className="panel annotation-workspace">
           <div className="annotation-toolbar">
             <span className="guide-status">{guideText.title}</span>
-            <button type="button" disabled={!regions.length} onClick={resetGeometry}>
-              Reset geometry
-            </button>
           </div>
           {current ? (
             <div className="annotation-viewport">
@@ -984,14 +1139,24 @@ export function TrainingPage() {
                   <option value="box">Box</option>
                 </select>
               </label>
-              <button
-                className="secondary-action"
-                disabled={!wizard.layoutSelected}
-                onClick={() => selectTool("tote")}
-                type="button"
-              >
-                Draw tote outline
-              </button>
+              <div className="wizard-action-row">
+                <button
+                  className="secondary-action"
+                  disabled={!wizard.layoutSelected}
+                  onClick={() => selectTool("tote")}
+                  type="button"
+                >
+                  Draw tote outline
+                </button>
+                <button
+                  className="reset-stage-action"
+                  disabled={!wizard.toteComplete}
+                  onClick={resetOutline}
+                  type="button"
+                >
+                  Reset
+                </button>
+              </div>
             </section>
 
             <section className={`wizard-step ${wizard.dividersComplete ? "complete" : ""} ${wizard.toteComplete && !wizard.dividersComplete ? "active" : ""}`}>
@@ -1017,20 +1182,30 @@ export function TrainingPage() {
                     ? "Open totes have no divider. Cell A is created automatically."
                     : "Mark the divider with one line crossing the full tote outline."}
               </p>
-              <button
-                className="secondary-action"
-                disabled={
-                  !wizard.toteComplete ||
-                  wizard.dividerTarget === 0 ||
-                  wizard.dividers.length >= wizard.dividerTarget
-                }
-                onClick={() => selectTool("divider")}
-                type="button"
-              >
-                {wizard.dividerTarget > 1
-                  ? `Draw divider ${Math.min(wizard.dividers.length + 1, wizard.dividerTarget)}`
-                  : "Draw divider"}
-              </button>
+              <div className="wizard-action-row">
+                <button
+                  className="secondary-action"
+                  disabled={
+                    !wizard.toteComplete ||
+                    wizard.dividerTarget === 0 ||
+                    wizard.dividers.length >= wizard.dividerTarget
+                  }
+                  onClick={() => selectTool("divider")}
+                  type="button"
+                >
+                  {wizard.dividerTarget > 1
+                    ? `Draw divider ${Math.min(wizard.dividers.length + 1, wizard.dividerTarget)}`
+                    : "Draw divider"}
+                </button>
+                <button
+                  className="reset-stage-action"
+                  disabled={!wizard.dividers.length && !wizard.cells.length}
+                  onClick={resetDividers}
+                  type="button"
+                >
+                  Reset
+                </button>
+              </div>
             </section>
 
             <section className={`wizard-step ${wizard.labelsComplete ? "complete" : ""} ${wizard.dividersComplete && !wizard.labelsComplete ? "active" : ""}`}>

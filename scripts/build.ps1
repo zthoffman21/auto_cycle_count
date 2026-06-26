@@ -1,7 +1,11 @@
 [CmdletBinding()]
 param(
     [ValidateNotNullOrEmpty()]
-    [string]$ImageName = "cycle-count-vision:latest"
+    [string]$ImageName = "cycle-count-vision:latest",
+
+    [string]$DependencyImage = "",
+
+    [switch]$BuildDependencyImage
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,7 +48,42 @@ catch {
 }
 
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$defaultDependencyImage = "cycle-count-vision-dependencies:latest"
+
+if ($BuildDependencyImage -and -not $DependencyImage) {
+    $DependencyImage = $defaultDependencyImage
+}
+
+if ($BuildDependencyImage) {
+    Write-Host "Building vision dependency image $DependencyImage..."
+    Invoke-Docker -DockerArguments @(
+        "build",
+        "--target", "vision-dependencies",
+        "--tag", $DependencyImage,
+        $workspace
+    )
+}
+elseif (-not $DependencyImage) {
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker image inspect $defaultDependencyImage *> $null
+        $dependencyImageExists = $LASTEXITCODE -eq 0
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($dependencyImageExists) {
+        $DependencyImage = $defaultDependencyImage
+    }
+}
 
 Write-Host "Building $ImageName..."
-Invoke-Docker -DockerArguments @("build", "--target", "vision", "--tag", $ImageName, $workspace)
+$buildArguments = @("build", "--target", "vision", "--tag", $ImageName)
+if ($DependencyImage) {
+    Write-Host "Using vision dependency image $DependencyImage."
+    $buildArguments += "--build-arg", "VISION_DEPENDENCIES_IMAGE=$DependencyImage"
+}
+$buildArguments += $workspace
+Invoke-Docker -DockerArguments $buildArguments
 Write-Host "Build complete." -ForegroundColor Green

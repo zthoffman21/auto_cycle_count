@@ -1,3 +1,5 @@
+ARG VISION_DEPENDENCIES_IMAGE=vision-dependencies
+
 FROM node:22-slim AS dashboard-build
 
 WORKDIR /dashboard
@@ -63,6 +65,8 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
        pip install ".[vision]" --extra-index-url https://download.pytorch.org/whl/cu126 \
     && rm -rf tote_vision
 
+FROM ${VISION_DEPENDENCIES_IMAGE} AS selected-vision-dependencies
+
 FROM python-base AS app-source
 COPY tote_vision ./tote_vision
 COPY --from=dashboard-build /dashboard/dist ./dashboard/dist
@@ -81,7 +85,7 @@ USER app
 
 FROM app-source AS vision
 USER root
-COPY --from=vision-dependencies /usr/local /usr/local
+COPY --from=selected-vision-dependencies /usr/local /usr/local
 RUN pip install . --no-deps --force-reinstall
 USER app
 

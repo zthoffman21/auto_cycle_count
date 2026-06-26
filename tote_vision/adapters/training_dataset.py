@@ -73,23 +73,23 @@ class TrainingDatasetStore:
         except (UnidentifiedImageError, OSError) as exc:
             raise TrainingDataError("upload must be a valid JPEG, PNG, or WebP image") from exc
 
-        now = datetime.now(UTC)
-        storage_filename = f"{image_id}{suffix}"
-        record = TrainingImage(
-            image_id=image_id,
-            original_filename=Path(original_filename).name,
-            storage_filename=storage_filename,
-            image_uri=f"{self._public_prefix}/{storage_filename}",
-            width=width,
-            height=height,
-            split=DatasetSplit.TRAIN,
-            layout=ToteLayout.UNKNOWN,
-            regions=(),
-            ready=False,
-            created_at=now,
-            updated_at=now,
-        )
         with self._lock:
+            now = datetime.now(UTC)
+            storage_filename = f"{image_id}{suffix}"
+            record = TrainingImage(
+                image_id=image_id,
+                original_filename=Path(original_filename).name,
+                storage_filename=storage_filename,
+                image_uri=f"{self._public_prefix}/{storage_filename}",
+                width=width,
+                height=height,
+                split=self._next_default_split(),
+                layout=ToteLayout.UNKNOWN,
+                regions=(),
+                ready=False,
+                created_at=now,
+                updated_at=now,
+            )
             (self._images / storage_filename).write_bytes(content)
             self._write_record(record)
         return record
@@ -159,6 +159,14 @@ class TrainingDatasetStore:
 
     def _read_record(self, path: Path) -> TrainingImage:
         return _record_from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def _next_default_split(self) -> DatasetSplit:
+        records = [self._read_record(path) for path in self._annotations.glob("*.json")]
+        train_count = sum(record.split is DatasetSplit.TRAIN for record in records)
+        valid_count = sum(record.split is DatasetSplit.VALID for record in records)
+        next_total = train_count + valid_count + 1
+        target_valid = next_total // 5
+        return DatasetSplit.VALID if valid_count < target_valid else DatasetSplit.TRAIN
 
     def _schedule_export_rebuild(self) -> None:
         with self._export_condition:

@@ -21,8 +21,15 @@ thresholds remain `UNCERTAIN`.
 Run these commands from the project root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1 -BuildDependencyImage
 powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
+```
+
+The first build creates `cycle-count-vision-dependencies:latest`, which contains the slow CUDA,
+PyTorch, and RF-DETR dependency layer. Later app-only rebuilds automatically reuse that image:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ```
 
 Open the training page:
@@ -33,9 +40,10 @@ Start-Process http://localhost:8000/train
 
 ## 2. Upload and annotate images
 
-For every image in `/train`:
+For every uploaded image:
 
-1. Assign `train` or `valid`. Use roughly 80% train and 20% validation.
+1. Review the automatically assigned dataset split. New uploads default to roughly 80% `train`
+   and 20% `valid`; change the split only when you need to rebalance the dataset manually.
 2. Select the tote layout.
 3. Draw exactly one tote polygon or box. For an open tote, this automatically creates cell `A`
    with the same geometry.
@@ -85,7 +93,7 @@ docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/workspa
 ## 6. Train RF-DETR tote and cell segmentation
 
 ```powershell
-docker run --name rfdetr-train --rm --gpus all --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:latest python scripts/train_rfdetr.py --dataset data/training/exports/rfdetr --output output/rfdetr --model-output models/rf-detr-seg-small-totes.pth
+docker run --name rfdetr-train --rm --gpus all --shm-size=8g --mount "type=bind,source=$((Get-Location).Path),target=/workspace" --workdir /workspace cycle-count-vision:latest python scripts/train_rfdetr.py --dataset data/training/exports/rfdetr --output output/rfdetr --model-output models/rf-detr-seg-small-totes.pth --log-every-n-steps 1 --num-workers 3 --progress-bar tqdm --sanity-val-steps 0
 ```
 
 This trains class ID `0` as `tote` and class ID `1` as `cell`. During inference, detected cell

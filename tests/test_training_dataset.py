@@ -105,6 +105,46 @@ def test_incomplete_draft_annotation_is_saved(tmp_path: Path) -> None:
     assert updated.split is DatasetSplit.VALID
 
 
+def test_uploaded_images_default_to_rough_train_valid_split(tmp_path: Path) -> None:
+    store = TrainingDatasetStore(tmp_path)
+
+    splits = [store.create_image(f"source-{index}.png", _png()).split for index in range(10)]
+
+    assert splits == [
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.VALID,
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.VALID,
+    ]
+
+
+def test_manual_split_override_is_respected_by_future_defaults(tmp_path: Path) -> None:
+    store = TrainingDatasetStore(tmp_path)
+    first = store.create_image("source-1.png", _png())
+    store.update_image(
+        first.image_id,
+        split=DatasetSplit.VALID,
+        layout=ToteLayout.UNKNOWN,
+        regions=(),
+        ready=False,
+    )
+
+    splits = [store.create_image(f"source-{index}.png", _png()).split for index in range(2, 6)]
+
+    assert splits == [
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+        DatasetSplit.TRAIN,
+    ]
+
+
 def test_runtime_fail_states_are_rejected_as_training_labels(tmp_path: Path) -> None:
     store = TrainingDatasetStore(tmp_path)
     image = store.create_image("source.png", _png())
