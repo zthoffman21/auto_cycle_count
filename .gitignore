@@ -12,7 +12,8 @@ data/
 
 # Model checkpoints — download separately (see TRAINING_GUIDE.md)
 models/
-
+!demo/models/
+!demo/models/**
 # Training output
 output/
 

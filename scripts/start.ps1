@@ -59,7 +59,14 @@ $trainingDirectory = Join-Path $workspace "data\training"
 New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path $trainingDirectory | Out-Null
 if (-not $ModelDirectory) {
-    $ModelDirectory = Join-Path $workspace "models"
+    $demoModelDirectory = Join-Path $workspace "demo\models"
+    $useDemoModel = Read-Host "Use demo model? (y/n)"
+    if ($useDemoModel -ceq "y") {
+        $ModelDirectory = $demoModelDirectory
+    }
+    else {
+        $ModelDirectory = Join-Path $workspace "models"
+    }
 }
 
 $requiredArtifacts = @(
